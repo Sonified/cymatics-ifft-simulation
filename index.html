@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cymatics Wave Simulation</title>
+    <title>Cymatics IFFT Simulation</title>
     <style>
         * {
             margin: 0;
@@ -160,7 +160,7 @@
 </head>
 <body>
     <div id="controls">
-        <h3>Cymatics Simulation</h3>
+        <h3>Cymatics IFFT Simulation</h3>
 
         <div class="control-group">
             <label>Resolution <span class="value" id="resValue">512×512</span></label>
@@ -272,6 +272,19 @@
             </select>
         </div>
 
+        <h3 style="margin-top: 15px;">IFFT Sonification</h3>
+
+        <div class="control-group">
+            <label><input type="checkbox" id="interpolateSpectrums"> Interpolate Spectrums</label>
+        </div>
+
+        <div class="control-group">
+            <label>Output Volume <span class="value" id="sonifyVolumeValue">50%</span></label>
+            <input type="range" id="sonifyVolume" min="0" max="100" step="1" value="50">
+        </div>
+
+        <button id="sonifyToggle">Start Sonification</button>
+
         <div id="fps">FPS: --</div>
     </div>
 
@@ -329,6 +342,14 @@
         // Stereo size scale (percentage of max)
         let stereoSizeScale = 1.0;
         let maxStereoSize = 0; // Will be calculated
+
+        // IFFT Sonification state
+        let sonifyRunning = false;
+        let sonifyAudioContext = null;
+        let sonifyWorkletNode = null;
+        let sonifyVolume = 0.5;
+        let interpolateSpectrums = false;
+        let audioDataBuffer = null; // Float32Array for readPixels
 
         // === Three.js Setup ===
         const scene = new THREE.Scene();
@@ -397,6 +418,19 @@
             writeTargetR = new THREE.WebGLRenderTarget(size, size, renderTargetOptions);
             simulationMaterialR.uniforms.uResolution.value.set(size, size);
             displayMaterialR.uniforms.uResolution.value.set(size, size);
+
+            // Update reduction targets for new resolution
+            reductionTarget.dispose();
+            reductionTarget = new THREE.WebGLRenderTarget(1, size, {
+                format: THREE.RGBAFormat,
+                type: THREE.FloatType,
+                minFilter: THREE.NearestFilter,
+                magFilter: THREE.NearestFilter
+            });
+            reductionMaterial.uniforms.uResolution.value.set(size, size);
+
+            // Reallocate audio data buffer for the reduced spectrum (1 x size)
+            audioDataBuffer = new Float32Array(size * 4); // RGBA for 1 column
         }
 
         // === Simulation Shader ===
@@ -561,6 +595,74 @@
                 }
             `
         });
+
+        // === Reduction Shader (for IFFT sonification) ===
+        // Sums each row of the wave texture with L/R pan weighting
+        // Output: each pixel Y = frequency bin, R = left amplitude, G = right amplitude
+        const reductionMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uWaveState: { value: null },
+                uResolution: { value: new THREE.Vector2(simResolution, simResolution) }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+
+                uniform sampler2D uWaveState;
+                uniform vec2 uResolution;
+
+                varying vec2 vUv;
+
+                void main() {
+                    float y = vUv.y; // This row = frequency bin
+                    float left = 0.0;
+                    float right = 0.0;
+                    float texelX = 1.0 / uResolution.x;
+
+                    // Sum across the row with pan weighting
+                    // Use 512 iterations max - covers up to 2048 resolution with some aliasing
+                    for (int i = 0; i < 512; i++) {
+                        float x = (float(i) + 0.5) / uResolution.x;
+                        if (x >= 1.0) break;
+
+                        // Only sample within the circle (distance from center < 0.5)
+                        vec2 centered = vec2(x, y) - 0.5;
+                        float dist = length(centered);
+                        if (dist < 0.48) {
+                            float amp = texture2D(uWaveState, vec2(x, y)).r;
+                            float panWeight = x; // 0 = full left, 1 = full right
+                            left += amp * (1.0 - panWeight);
+                            right += amp * panWeight;
+                        }
+                    }
+
+                    // Normalize by approximate number of samples in circle at this Y
+                    float normalizer = uResolution.x * 0.3; // rough average accounting for circle
+                    left /= normalizer;
+                    right /= normalizer;
+
+                    gl_FragColor = vec4(left, right, 0.0, 1.0);
+                }
+            `
+        });
+
+        // Reduction render target: 1 pixel wide x resolution tall (one row per frequency bin)
+        let reductionTarget = new THREE.WebGLRenderTarget(1, simResolution, {
+            format: THREE.RGBAFormat,
+            type: THREE.FloatType,
+            minFilter: THREE.NearestFilter,
+            magFilter: THREE.NearestFilter
+        });
+
+        const reductionMesh = new THREE.Mesh(geometry, reductionMaterial);
+        const reductionScene = new THREE.Scene();
+        reductionScene.add(reductionMesh);
 
         // === Right Channel Materials (for stereo) ===
         const simulationMaterialR = new THREE.ShaderMaterial({
@@ -1025,6 +1127,178 @@
             stereoClickOffsetValueEl.textContent = `${stereoClickOffset}px`;
         });
 
+        // === IFFT Sonification Controls ===
+        const sonifyToggleBtn = document.getElementById('sonifyToggle');
+        const sonifyVolumeSlider = document.getElementById('sonifyVolume');
+        const sonifyVolumeValueEl = document.getElementById('sonifyVolumeValue');
+        const interpolateCheckbox = document.getElementById('interpolateSpectrums');
+
+        sonifyVolumeSlider.addEventListener('input', (e) => {
+            sonifyVolume = parseFloat(e.target.value) / 100;
+            sonifyVolumeValueEl.textContent = `${e.target.value}%`;
+            if (sonifyWorkletNode) {
+                sonifyWorkletNode.port.postMessage({ type: 'volume', value: sonifyVolume });
+            }
+        });
+
+        interpolateCheckbox.addEventListener('change', (e) => {
+            interpolateSpectrums = e.target.checked;
+            if (sonifyWorkletNode) {
+                sonifyWorkletNode.port.postMessage({ type: 'interpolate', value: interpolateSpectrums });
+            }
+        });
+
+        // AudioWorklet processor code as a blob
+        const workletCode = `
+class IFFTProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.spectrumQueue = [];
+        this.currentSpectrum = null;
+        this.nextSpectrum = null;
+        this.phase = new Float32Array(2048); // Max FFT size
+        this.sampleIndex = 0;
+        this.samplesPerSpectrum = 128; // Will be updated based on frame rate
+        this.volume = 0.5;
+        this.interpolate = false;
+        this.fftSize = 512;
+
+        // Initialize random phases for each bin
+        for (let i = 0; i < this.phase.length; i++) {
+            this.phase[i] = Math.random() * Math.PI * 2;
+        }
+
+        this.port.onmessage = (e) => {
+            if (e.data.type === 'spectrum') {
+                this.spectrumQueue.push(e.data);
+                this.fftSize = e.data.fftSize;
+                this.samplesPerSpectrum = Math.floor(sampleRate / 60 / e.data.simSteps);
+            } else if (e.data.type === 'volume') {
+                this.volume = e.data.value;
+            } else if (e.data.type === 'interpolate') {
+                this.interpolate = e.data.value;
+            }
+        };
+    }
+
+    process(inputs, outputs, parameters) {
+        const output = outputs[0];
+        const leftChannel = output[0];
+        const rightChannel = output[1];
+
+        if (!leftChannel || !rightChannel) return true;
+
+        for (let i = 0; i < leftChannel.length; i++) {
+            // Advance to next spectrum if needed
+            if (this.sampleIndex >= this.samplesPerSpectrum) {
+                this.sampleIndex = 0;
+                this.currentSpectrum = this.nextSpectrum;
+                if (this.spectrumQueue.length > 0) {
+                    this.nextSpectrum = this.spectrumQueue.shift();
+                }
+            }
+
+            let leftSample = 0;
+            let rightSample = 0;
+
+            if (this.currentSpectrum) {
+                const leftBins = this.currentSpectrum.left;
+                const rightBins = this.currentSpectrum.right;
+                const t = this.interpolate && this.nextSpectrum
+                    ? this.sampleIndex / this.samplesPerSpectrum
+                    : 0;
+
+                // Additive synthesis from frequency bins
+                for (let bin = 1; bin < this.fftSize / 2; bin++) {
+                    // Frequency of this bin
+                    const freq = bin * sampleRate / this.fftSize;
+                    if (freq > 20000) break; // Skip ultrasonic
+
+                    // Get amplitude (interpolate if enabled)
+                    let leftAmp = leftBins[bin] || 0;
+                    let rightAmp = rightBins[bin] || 0;
+
+                    if (this.interpolate && this.nextSpectrum) {
+                        leftAmp = leftAmp * (1 - t) + (this.nextSpectrum.left[bin] || 0) * t;
+                        rightAmp = rightAmp * (1 - t) + (this.nextSpectrum.right[bin] || 0) * t;
+                    }
+
+                    // Phase accumulator for this bin
+                    this.phase[bin] += 2 * Math.PI * freq / sampleRate;
+                    if (this.phase[bin] > Math.PI * 2) this.phase[bin] -= Math.PI * 2;
+
+                    // Add contribution
+                    const sinVal = Math.sin(this.phase[bin]);
+                    leftSample += leftAmp * sinVal;
+                    rightSample += rightAmp * sinVal;
+                }
+
+                // Normalize and apply volume
+                const normalizer = Math.sqrt(this.fftSize) * 0.5;
+                leftSample = (leftSample / normalizer) * this.volume;
+                rightSample = (rightSample / normalizer) * this.volume;
+
+                // Soft clip to prevent harsh distortion
+                leftSample = Math.tanh(leftSample);
+                rightSample = Math.tanh(rightSample);
+            }
+
+            leftChannel[i] = leftSample;
+            rightChannel[i] = rightSample;
+            this.sampleIndex++;
+        }
+
+        return true;
+    }
+}
+
+registerProcessor('ifft-processor', IFFTProcessor);
+`;
+
+        const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
+        const workletUrl = URL.createObjectURL(workletBlob);
+
+        async function startSonification() {
+            if (sonifyRunning) return;
+
+            sonifyAudioContext = new AudioContext({ sampleRate: 44100 });
+            await sonifyAudioContext.audioWorklet.addModule(workletUrl);
+            sonifyWorkletNode = new AudioWorkletNode(sonifyAudioContext, 'ifft-processor', {
+                outputChannelCount: [2]
+            });
+            sonifyWorkletNode.connect(sonifyAudioContext.destination);
+
+            // Initialize audio buffer for reduced spectrum (1 x resolution)
+            audioDataBuffer = new Float32Array(simResolution * 4);
+
+            // Send initial settings
+            sonifyWorkletNode.port.postMessage({ type: 'volume', value: sonifyVolume });
+            sonifyWorkletNode.port.postMessage({ type: 'interpolate', value: interpolateSpectrums });
+
+            sonifyRunning = true;
+            sonifyToggleBtn.textContent = 'Stop Sonification';
+        }
+
+        function stopSonification() {
+            if (!sonifyRunning) return;
+
+            sonifyWorkletNode.disconnect();
+            sonifyAudioContext.close();
+            sonifyWorkletNode = null;
+            sonifyAudioContext = null;
+
+            sonifyRunning = false;
+            sonifyToggleBtn.textContent = 'Start Sonification';
+        }
+
+        sonifyToggleBtn.addEventListener('click', () => {
+            if (sonifyRunning) {
+                stopSonification();
+            } else {
+                startSonification();
+            }
+        });
+
         // Display mode switching
         displayModeSelect.addEventListener('change', (e) => {
             displayMode = e.target.value;
@@ -1135,6 +1409,41 @@
                     renderer.render(scene, camera);
 
                     [readTarget, writeTarget] = [writeTarget, readTarget];
+
+                    // === IFFT Sonification: Render reduction and read spectrum for each sim step ===
+                    // Key optimization: we read 1×512 pixels per step, not 512×512!
+                    if (sonifyRunning && sonifyWorkletNode) {
+                        // Render reduction (sum rows with pan weighting) → 1×512 texture
+                        reductionMaterial.uniforms.uWaveState.value = readTarget.texture;
+                        renderer.setRenderTarget(reductionTarget);
+                        renderer.render(reductionScene, camera);
+
+                        // Read the tiny reduced spectrum immediately
+                        const gl = renderer.getContext();
+                        if (!audioDataBuffer || audioDataBuffer.length !== simResolution * 4) {
+                            audioDataBuffer = new Float32Array(simResolution * 4);
+                        }
+
+                        gl.readPixels(0, 0, 1, simResolution, gl.RGBA, gl.FLOAT, audioDataBuffer);
+
+                        // Extract L/R spectrum and send to audio worklet
+                        const leftBins = new Float32Array(simResolution);
+                        const rightBins = new Float32Array(simResolution);
+
+                        for (let bin = 0; bin < simResolution; bin++) {
+                            const idx = bin * 4;
+                            leftBins[bin] = audioDataBuffer[idx];     // R channel = left
+                            rightBins[bin] = audioDataBuffer[idx + 1]; // G channel = right
+                        }
+
+                        sonifyWorkletNode.port.postMessage({
+                            type: 'spectrum',
+                            left: leftBins,
+                            right: rightBins,
+                            fftSize: simResolution,
+                            simSteps: simSteps
+                        });
+                    }
                 }
 
                 displayMaterial.uniforms.uState.value = readTarget.texture;
