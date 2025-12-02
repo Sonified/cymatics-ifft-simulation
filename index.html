@@ -1208,18 +1208,21 @@ class IFFTProcessor extends AudioWorkletProcessor {
                     : 0;
 
                 // Additive synthesis from frequency bins
+                // Boost factor to make the quiet wave amplitudes audible
+                const boost = 50.0;
+
                 for (let bin = 1; bin < this.fftSize / 2; bin++) {
                     // Frequency of this bin
                     const freq = bin * sampleRate / this.fftSize;
                     if (freq > 20000) break; // Skip ultrasonic
 
                     // Get amplitude (interpolate if enabled)
-                    let leftAmp = leftBins[bin] || 0;
-                    let rightAmp = rightBins[bin] || 0;
+                    let leftAmp = (leftBins[bin] || 0) * boost;
+                    let rightAmp = (rightBins[bin] || 0) * boost;
 
                     if (this.interpolate && this.nextSpectrum) {
-                        leftAmp = leftAmp * (1 - t) + (this.nextSpectrum.left[bin] || 0) * t;
-                        rightAmp = rightAmp * (1 - t) + (this.nextSpectrum.right[bin] || 0) * t;
+                        leftAmp = leftAmp * (1 - t) + (this.nextSpectrum.left[bin] || 0) * boost * t;
+                        rightAmp = rightAmp * (1 - t) + (this.nextSpectrum.right[bin] || 0) * boost * t;
                     }
 
                     // Phase accumulator for this bin
@@ -1232,8 +1235,8 @@ class IFFTProcessor extends AudioWorkletProcessor {
                     rightSample += rightAmp * sinVal;
                 }
 
-                // Normalize and apply volume
-                const normalizer = Math.sqrt(this.fftSize) * 0.5;
+                // Normalize and apply volume (reduced normalizer since we boosted input)
+                const normalizer = this.fftSize * 0.1;
                 leftSample = (leftSample / normalizer) * this.volume;
                 rightSample = (rightSample / normalizer) * this.volume;
 
@@ -1433,6 +1436,13 @@ registerProcessor('ifft-processor', IFFTProcessor);
                             const idx = bin * 4;
                             leftBins[bin] = audioDataBuffer[idx];     // R channel = left
                             rightBins[bin] = audioDataBuffer[idx + 1]; // G channel = right
+                        }
+
+                        // Debug: log max amplitude occasionally
+                        if (Math.random() < 0.01) {
+                            const maxL = Math.max(...leftBins);
+                            const maxR = Math.max(...rightBins);
+                            console.log('Spectrum max L/R:', maxL.toFixed(4), maxR.toFixed(4));
                         }
 
                         sonifyWorkletNode.port.postMessage({
