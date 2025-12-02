@@ -660,10 +660,6 @@
             magFilter: THREE.NearestFilter
         });
 
-        const reductionMesh = new THREE.Mesh(geometry, reductionMaterial);
-        const reductionScene = new THREE.Scene();
-        reductionScene.add(reductionMesh);
-
         // === Right Channel Materials (for stereo) ===
         const simulationMaterialR = new THREE.ShaderMaterial({
             uniforms: {
@@ -697,6 +693,9 @@
         const displayMesh = new THREE.Mesh(geometry, displayMaterial);
         const simulationMeshR = new THREE.Mesh(geometry, simulationMaterialR);
         const displayMeshR = new THREE.Mesh(geometry, displayMaterialR);
+        const reductionMesh = new THREE.Mesh(geometry, reductionMaterial);
+        const reductionScene = new THREE.Scene();
+        reductionScene.add(reductionMesh);
 
         // === Pointer State ===
         const pointer = { x: 0, y: 0, active: false };
