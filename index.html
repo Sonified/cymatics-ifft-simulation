@@ -1172,6 +1172,12 @@ class IFFTProcessor extends AudioWorkletProcessor {
                 this.spectrumQueue.push(e.data);
                 this.fftSize = e.data.fftSize;
                 this.samplesPerSpectrum = Math.floor(sampleRate / 60 / e.data.simSteps);
+                // Debug: log first spectrum data
+                if (this.spectrumQueue.length === 1) {
+                    const maxL = Math.max(...e.data.left);
+                    const maxR = Math.max(...e.data.right);
+                    console.log('First spectrum received, max L/R:', maxL, maxR, 'length:', e.data.left.length);
+                }
             } else if (e.data.type === 'volume') {
                 this.volume = e.data.value;
             } else if (e.data.type === 'interpolate') {
@@ -1291,11 +1297,19 @@ registerProcessor('ifft-processor', IFFTProcessor);
             if (sonifyRunning) return;
 
             sonifyAudioContext = new AudioContext({ sampleRate: 44100 });
+
+            // Resume if suspended (browsers require user gesture)
+            if (sonifyAudioContext.state === 'suspended') {
+                await sonifyAudioContext.resume();
+            }
+            console.log('AudioContext state:', sonifyAudioContext.state);
+
             await sonifyAudioContext.audioWorklet.addModule(workletUrl);
             sonifyWorkletNode = new AudioWorkletNode(sonifyAudioContext, 'ifft-processor', {
                 outputChannelCount: [2]
             });
             sonifyWorkletNode.connect(sonifyAudioContext.destination);
+            console.log('Sonification started, worklet connected');
 
             // Initialize audio buffer for reduced spectrum (1 x resolution)
             audioDataBuffer = new Float32Array(simResolution * 4);
@@ -1472,10 +1486,11 @@ registerProcessor('ifft-processor', IFFTProcessor);
                             console.log('Spectrum max L/R:', maxL.toFixed(4), maxR.toFixed(4));
                         }
 
+                        // Convert to regular arrays for postMessage (Float32Array can have issues)
                         sonifyWorkletNode.port.postMessage({
                             type: 'spectrum',
-                            left: leftBins,
-                            right: rightBins,
+                            left: Array.from(leftBins),
+                            right: Array.from(rightBins),
                             fftSize: simResolution,
                             simSteps: simSteps
                         });
