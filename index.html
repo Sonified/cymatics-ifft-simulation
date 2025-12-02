@@ -1187,9 +1187,23 @@ class IFFTProcessor extends AudioWorkletProcessor {
 
         if (!leftChannel || !rightChannel) return true;
 
+        // Debug: log state occasionally
+        this.debugCounter = (this.debugCounter || 0) + 1;
+        if (this.debugCounter % 1000 === 0) {
+            console.log('AudioWorklet state:', {
+                queueLen: this.spectrumQueue.length,
+                hasCurrent: !!this.currentSpectrum,
+                hasNext: !!this.nextSpectrum,
+                sampleIndex: this.sampleIndex,
+                samplesPerSpectrum: this.samplesPerSpectrum,
+                fftSize: this.fftSize
+            });
+        }
+
         // If we don't have a current spectrum yet, try to get one
         if (!this.currentSpectrum && this.spectrumQueue.length > 0) {
             this.currentSpectrum = this.spectrumQueue.shift();
+            console.log('Got first spectrum!');
         }
         if (!this.nextSpectrum && this.spectrumQueue.length > 0) {
             this.nextSpectrum = this.spectrumQueue.shift();
@@ -1251,6 +1265,11 @@ class IFFTProcessor extends AudioWorkletProcessor {
                 // Soft clip to prevent harsh distortion
                 leftSample = Math.tanh(leftSample);
                 rightSample = Math.tanh(rightSample);
+
+                // Debug: log sample values occasionally
+                if (this.debugCounter % 1000 === 0 && i === 0) {
+                    console.log('Sample values L/R:', leftSample.toFixed(4), rightSample.toFixed(4));
+                }
             }
 
             leftChannel[i] = leftSample;
