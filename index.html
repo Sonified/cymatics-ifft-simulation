@@ -1187,13 +1187,21 @@ class IFFTProcessor extends AudioWorkletProcessor {
 
         if (!leftChannel || !rightChannel) return true;
 
+        // If we don't have a current spectrum yet, try to get one
+        if (!this.currentSpectrum && this.spectrumQueue.length > 0) {
+            this.currentSpectrum = this.spectrumQueue.shift();
+        }
+        if (!this.nextSpectrum && this.spectrumQueue.length > 0) {
+            this.nextSpectrum = this.spectrumQueue.shift();
+        }
+
         for (let i = 0; i < leftChannel.length; i++) {
             // Advance to next spectrum if needed
             if (this.sampleIndex >= this.samplesPerSpectrum) {
                 this.sampleIndex = 0;
-                this.currentSpectrum = this.nextSpectrum;
-                if (this.spectrumQueue.length > 0) {
-                    this.nextSpectrum = this.spectrumQueue.shift();
+                if (this.nextSpectrum) {
+                    this.currentSpectrum = this.nextSpectrum;
+                    this.nextSpectrum = this.spectrumQueue.length > 0 ? this.spectrumQueue.shift() : null;
                 }
             }
 
