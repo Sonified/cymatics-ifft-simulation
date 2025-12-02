@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cymatics Wave Simulation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #000;
+            overflow: hidden;
+            min-height: 100vh;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            gap: 20px;
+        }
+        #canvas-container canvas {
+            display: block;
+            border-radius: 50%;
+        }
+        #canvas-container.stereo {
+            /* In stereo mode, shift right to avoid control panel */
+            left: calc(50% + 120px);
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+        #stereo-canvases {
+            display: flex;
+            gap: 0px; /* No gap - edges touch in center for stereoscopic viewing */
+        }
+        #stereo-size-control {
+            margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        #stereo-size-control input {
+            width: 200px;
+            cursor: pointer;
+        }
+        #stereo-size-control span {
+            opacity: 0.6;
+            min-width: 40px;
+        }
+        #stereo-spread-control {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        #stereo-spread-control input {
+            width: 200px;
+            cursor: pointer;
+        }
+        #stereo-spread-control span {
+            opacity: 0.6;
+            min-width: 40px;
+        }
+        #stereo-clickoffset-control {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        #stereo-clickoffset-control input {
+            width: 200px;
+            cursor: pointer;
+        }
+        #stereo-clickoffset-control span {
+            opacity: 0.6;
+            min-width: 40px;
+        }
+        /* Make overlapping canvases blend */
+        #stereo-canvases canvas {
+            mix-blend-mode: screen;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            color: #fff;
+            font-family: monospace;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            min-width: 200px;
+        }
+        #controls h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+            padding-bottom: 5px;
+        }
+        .control-group {
+            margin-bottom: 12px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 4px;
+            opacity: 0.8;
+        }
+        .control-group select,
+        .control-group input[type="range"] {
+            width: 100%;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #fff;
+            padding: 4px;
+            border-radius: 4px;
+        }
+        .control-group input[type="range"] {
+            padding: 0;
+            cursor: pointer;
+        }
+        .control-group .value {
+            float: right;
+            opacity: 0.6;
+        }
+        #controls button {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: monospace;
+        }
+        #controls button:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        #fps {
+            margin-top: 10px;
+            opacity: 0.5;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h3>Cymatics Simulation</h3>
+
+        <div class="control-group">
+            <label>Resolution <span class="value" id="resValue">512×512</span></label>
+            <select id="resolution">
+                <option value="128">128×128</option>
+                <option value="256">256×256</option>
+                <option value="512" selected>512×512</option>
+                <option value="1024">1024×1024</option>
+                <option value="2048">2048×2048</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Sim Steps/Frame <span class="value" id="stepsValue">1</span></label>
+            <input type="range" id="simSteps" min="1" max="32" step="1" value="1">
+        </div>
+
+        <div class="control-group">
+            <label>Wave Speed <span class="value" id="speedValue">0.50</span></label>
+            <input type="range" id="waveSpeed" min="0.1" max="0.7" step="0.01" value="0.5">
+        </div>
+
+        <div class="control-group">
+            <label>Damping <span class="value" id="dampValue">0.998</span></label>
+            <input type="range" id="damping" min="0.95" max="0.9999" step="0.0001" value="0.998">
+        </div>
+
+        <div class="control-group">
+            <label>Force Strength <span class="value" id="forceValue">0.10</span></label>
+            <input type="range" id="forceStrength" min="0.01" max="0.3" step="0.01" value="0.1">
+        </div>
+
+        <div class="control-group">
+            <label>Brush Size <span class="value" id="brushValue">0.02</span></label>
+            <input type="range" id="brushSize" min="0.005" max="0.1" step="0.005" value="0.02">
+        </div>
+
+        <div class="control-group">
+            <label>Brush Softness <span class="value" id="softnessValue">50%</span></label>
+            <input type="range" id="brushSoftness" min="0" max="100" step="1" value="50">
+        </div>
+
+        <button id="resetBtn">Reset Simulation</button>
+
+        <h3 style="margin-top: 15px;">Oscillator</h3>
+
+        <div class="control-group">
+            <label>Frequency <span class="value" id="freqValue">220 Hz</span></label>
+            <input type="range" id="oscFrequency" min="20" max="1000" step="1" value="220">
+        </div>
+
+        <div class="control-group">
+            <label>Oscillator Strength <span class="value" id="oscStrengthValue">0.05</span></label>
+            <input type="range" id="oscStrength" min="0.01" max="1.0" step="0.01" value="0.05">
+        </div>
+
+        <div class="control-group">
+            <label>Speaker Size <span class="value" id="speakerSizeValue">0.08</span></label>
+            <input type="range" id="speakerSize" min="0.02" max="0.2" step="0.01" value="0.08">
+        </div>
+
+        <button id="oscToggle">Start Oscillator</button>
+
+        <div id="stereoControls" style="display: none;">
+            <h3 style="margin-top: 15px;">Left Channel</h3>
+
+            <div class="control-group">
+                <label>L Frequency <span class="value" id="freqValueL">220 Hz</span></label>
+                <input type="range" id="oscFrequencyL" min="20" max="1000" step="1" value="220">
+            </div>
+
+            <div class="control-group">
+                <label>L Strength <span class="value" id="oscStrengthValueL">0.05</span></label>
+                <input type="range" id="oscStrengthL" min="0.01" max="1.0" step="0.01" value="0.05">
+            </div>
+
+            <div class="control-group">
+                <label>L Speaker Size <span class="value" id="speakerSizeValueL">0.08</span></label>
+                <input type="range" id="speakerSizeL" min="0.02" max="0.2" step="0.01" value="0.08">
+            </div>
+
+            <h3 style="margin-top: 15px;">Right Channel</h3>
+
+            <div class="control-group">
+                <label>R Frequency <span class="value" id="freqValueR">220 Hz</span></label>
+                <input type="range" id="oscFrequencyR" min="20" max="1000" step="1" value="220">
+            </div>
+
+            <div class="control-group">
+                <label>R Strength <span class="value" id="oscStrengthValueR">0.05</span></label>
+                <input type="range" id="oscStrengthR" min="0.01" max="1.0" step="0.01" value="0.05">
+            </div>
+
+            <div class="control-group">
+                <label>R Speaker Size <span class="value" id="speakerSizeValueR">0.08</span></label>
+                <input type="range" id="speakerSizeR" min="0.02" max="0.2" step="0.01" value="0.08">
+            </div>
+
+            <button id="stereoOscToggle">Start Stereo Oscillators</button>
+        </div>
+
+        <h3 style="margin-top: 15px;">Display Mode</h3>
+
+        <div class="control-group">
+            <label>Mode</label>
+            <select id="displayMode">
+                <option value="mono" selected>Mono (Single)</option>
+                <option value="stereo">Stereoscopic (L/R)</option>
+            </select>
+        </div>
+
+        <div id="fps">FPS: --</div>
+    </div>
+
+    <div id="canvas-container">
+        <div id="stereo-canvases"></div>
+        <div id="stereo-size-control" style="display: none;">
+            <span>Size</span>
+            <input type="range" id="stereoSize" min="20" max="100" step="1" value="100">
+            <span id="stereoSizeValue">100%</span>
+        </div>
+        <div id="stereo-spread-control" style="display: none;">
+            <span>Spread</span>
+            <input type="range" id="stereoSpread" min="-300" max="300" step="1" value="0">
+            <span id="stereoSpreadValue">0px</span>
+        </div>
+        <div id="stereo-clickoffset-control" style="display: none;">
+            <span>Offset</span>
+            <input type="range" id="stereoClickOffset" min="-30" max="30" step="1" value="0">
+            <span id="stereoClickOffsetValue">0px</span>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // === Configuration (mutable) ===
+        let simResolution = 512;
+        let waveSpeed = 0.5;
+        let damping = 0.998;
+        let forceStrength = 0.1;
+        let brushSize = 0.02;
+        let brushSoftness = 0.5; // 0 = hard edge, 1 = soft gradient
+
+        // Oscillator settings (mono)
+        let oscFrequency = 220;
+        let oscStrength = 0.05;
+        let speakerSize = 0.08;
+        let simSteps = 1; // Physics steps per frame (oversampling)
+        let oscRunning = false;
+        let audioContext = null;
+        let oscillator = null;
+        let analyser = null;
+        let dataArray = null;
+
+        // Stereo oscillator settings
+        let displayMode = 'mono'; // 'mono' or 'stereo'
+        let oscFrequencyL = 220, oscFrequencyR = 220;
+        let oscStrengthL = 0.05, oscStrengthR = 0.05;
+        let speakerSizeL = 0.08, speakerSizeR = 0.08;
+        let stereoOscRunning = false;
+        let stereoAudioContext = null;
+        let oscillatorL = null, oscillatorR = null;
+        let analyserL = null, analyserR = null;
+        let dataArrayL = null, dataArrayR = null;
+
+        // Stereo size scale (percentage of max)
+        let stereoSizeScale = 1.0;
+        let maxStereoSize = 0; // Will be calculated
+
+        // === Three.js Setup ===
+        const scene = new THREE.Scene();
+        const sceneR = new THREE.Scene(); // Right channel scene for stereo
+        const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        const rendererR = new THREE.WebGLRenderer({ antialias: false }); // Right channel renderer
+
+        const canvasContainer = document.getElementById('canvas-container');
+        const stereoCanvases = document.getElementById('stereo-canvases');
+        // Both canvases live in stereoCanvases (L then R), container structure handles layout
+        stereoCanvases.appendChild(renderer.domElement);
+        rendererR.domElement.style.display = 'none';
+        stereoCanvases.appendChild(rendererR.domElement);
+
+        // Calculate canvas size to maximize as a square
+        function getCanvasSize() {
+            const padding = 40; // some margin from edges
+            const controlPanelWidth = 240; // control panel width + margin
+            const availableHeight = window.innerHeight - padding - 60; // Extra space for slider in stereo
+
+            if (displayMode === 'stereo') {
+                // Two circles side by side, account for control panel
+                const availableWidth = window.innerWidth - padding - controlPanelWidth;
+                const maxWidth = availableWidth / 2;
+                maxStereoSize = Math.min(maxWidth, availableHeight);
+                return maxStereoSize * stereoSizeScale;
+            }
+            // Mono mode - full width available
+            const availableWidth = window.innerWidth - padding;
+            return Math.min(availableWidth, availableHeight);
+        }
+
+        let canvasSize = getCanvasSize();
+        renderer.setSize(canvasSize, canvasSize);
+        rendererR.setSize(canvasSize, canvasSize);
+
+        // === Render Targets (Ping-Pong) ===
+        const renderTargetOptions = {
+            format: THREE.RGBAFormat,
+            type: THREE.FloatType,
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            wrapS: THREE.ClampToEdgeWrapping,
+            wrapT: THREE.ClampToEdgeWrapping
+        };
+
+        let readTarget = new THREE.WebGLRenderTarget(simResolution, simResolution, renderTargetOptions);
+        let writeTarget = new THREE.WebGLRenderTarget(simResolution, simResolution, renderTargetOptions);
+        // Right channel targets for stereo
+        let readTargetR = new THREE.WebGLRenderTarget(simResolution, simResolution, renderTargetOptions);
+        let writeTargetR = new THREE.WebGLRenderTarget(simResolution, simResolution, renderTargetOptions);
+
+        // === Create new render targets (for resolution change) ===
+        function createRenderTargets(size) {
+            readTarget.dispose();
+            writeTarget.dispose();
+            readTarget = new THREE.WebGLRenderTarget(size, size, renderTargetOptions);
+            writeTarget = new THREE.WebGLRenderTarget(size, size, renderTargetOptions);
+            simulationMaterial.uniforms.uResolution.value.set(size, size);
+            displayMaterial.uniforms.uResolution.value.set(size, size);
+            // Right channel
+            readTargetR.dispose();
+            writeTargetR.dispose();
+            readTargetR = new THREE.WebGLRenderTarget(size, size, renderTargetOptions);
+            writeTargetR = new THREE.WebGLRenderTarget(size, size, renderTargetOptions);
+            simulationMaterialR.uniforms.uResolution.value.set(size, size);
+            displayMaterialR.uniforms.uResolution.value.set(size, size);
+        }
+
+        // === Simulation Shader ===
+        const simulationMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uPrevState: { value: null },
+                uCurrState: { value: null },
+                uResolution: { value: new THREE.Vector2(simResolution, simResolution) },
+                uWaveSpeed: { value: waveSpeed },
+                uDamping: { value: damping },
+                uPointer: { value: new THREE.Vector3(0, 0, 0) }, // x, y, strength
+                uBrushSize: { value: brushSize },
+                uBrushSoftness: { value: brushSoftness },
+                uOscillator: { value: new THREE.Vector3(0.5, 0.5, 0) }, // x, y, amplitude
+                uSpeakerSize: { value: speakerSize },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+
+                uniform sampler2D uPrevState;
+                uniform sampler2D uCurrState;
+                uniform vec2 uResolution;
+                uniform float uWaveSpeed;
+                uniform float uDamping;
+                uniform vec3 uPointer; // x, y, strength
+                uniform float uBrushSize;
+                uniform float uBrushSoftness;
+                uniform vec3 uOscillator; // x, y, amplitude
+                uniform float uSpeakerSize;
+
+                varying vec2 vUv;
+
+                void main() {
+                    vec2 texel = 1.0 / uResolution;
+
+                    // Sample current and previous states
+                    // R channel = current height, G channel = previous height
+                    vec4 state = texture2D(uCurrState, vUv);
+                    float current = state.r;
+                    float previous = state.g;
+
+                    // Sample neighbors for Laplacian
+                    float left = texture2D(uCurrState, vUv + vec2(-texel.x, 0.0)).r;
+                    float right = texture2D(uCurrState, vUv + vec2(texel.x, 0.0)).r;
+                    float up = texture2D(uCurrState, vUv + vec2(0.0, texel.y)).r;
+                    float down = texture2D(uCurrState, vUv + vec2(0.0, -texel.y)).r;
+
+                    // Laplacian (discrete approximation)
+                    float laplacian = left + right + up + down - 4.0 * current;
+
+                    // Wave equation: Verlet integration
+                    // CFL stability: c² must be < 0.5 for 2D wave equation
+                    // We clamp to 0.49 to ensure stability at any slider value
+                    float velocity = current - previous;
+                    float c2 = min(uWaveSpeed * uWaveSpeed, 0.49);
+                    float acceleration = c2 * laplacian;
+                    float next = current + velocity + acceleration;
+
+                    // Apply damping
+                    next *= uDamping;
+
+                    // Circular boundary condition
+                    vec2 centered = vUv - 0.5;
+                    float dist = length(centered);
+                    float boundary = smoothstep(0.48, 0.5, dist);
+                    next *= (1.0 - boundary);
+
+                    // Apply pointer force (click/tap)
+                    if (uPointer.z > 0.0) {
+                        float pointerDist = length(vUv - uPointer.xy);
+
+                        // Softness controls the blend between hard circle and soft gradient
+                        // softness 0 = hard edge (smoothstep), softness 1 = soft gradient (gaussian)
+                        float normalizedDist = pointerDist / uBrushSize;
+
+                        // Hard edge: 1 inside brush, 0 outside with small transition
+                        float hardEdge = 1.0 - smoothstep(0.8, 1.0, normalizedDist);
+
+                        // Soft gradient: gaussian falloff
+                        float softGradient = exp(-normalizedDist * normalizedDist * 2.0);
+
+                        // Blend between hard and soft based on softness parameter
+                        float brushShape = mix(hardEdge, softGradient, uBrushSoftness);
+
+                        float pointerForce = brushShape * uPointer.z;
+                        next += pointerForce;
+                    }
+
+                    // Apply oscillator force (center speaker)
+                    if (abs(uOscillator.z) > 0.001) {
+                        float oscDist = length(vUv - uOscillator.xy);
+                        // Speaker pattern: gaussian falloff from center
+                        float speakerPattern = exp(-oscDist * oscDist / (uSpeakerSize * uSpeakerSize * 0.5));
+                        float oscForce = speakerPattern * uOscillator.z;
+                        next += oscForce;
+                    }
+
+                    // Store: R = new current, G = old current (becomes previous)
+                    gl_FragColor = vec4(next, current, 0.0, 1.0);
+                }
+            `
+        });
+
+        // === Display Shader ===
+        const displayMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uState: { value: null },
+                uResolution: { value: new THREE.Vector2(simResolution, simResolution) }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                precision highp float;
+
+                uniform sampler2D uState;
+                uniform vec2 uResolution;
+
+                varying vec2 vUv;
+
+                void main() {
+                    vec2 texel = 1.0 / uResolution;
+                    float height = texture2D(uState, vUv).r;
+
+                    // Compute gradient (for normal approximation)
+                    float left = texture2D(uState, vUv + vec2(-texel.x, 0.0)).r;
+                    float right = texture2D(uState, vUv + vec2(texel.x, 0.0)).r;
+                    float up = texture2D(uState, vUv + vec2(0.0, texel.y)).r;
+                    float down = texture2D(uState, vUv + vec2(0.0, -texel.y)).r;
+
+                    vec2 gradient = vec2(right - left, up - down) * 10.0;
+                    float steepness = length(gradient);
+
+                    // Color based on steepness (wave activity)
+                    vec3 baseColor = vec3(0.02, 0.05, 0.1);
+                    vec3 waveColor = vec3(0.2, 0.6, 0.9);
+                    vec3 color = mix(baseColor, waveColor, steepness);
+
+                    // Add height-based brightness
+                    color += height * vec3(0.5, 0.8, 1.0);
+
+                    // Circular mask
+                    vec2 centered = vUv - 0.5;
+                    float dist = length(centered);
+                    float mask = 1.0 - smoothstep(0.48, 0.5, dist);
+
+                    // Dark outside the container
+                    color *= mask;
+
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `
+        });
+
+        // === Right Channel Materials (for stereo) ===
+        const simulationMaterialR = new THREE.ShaderMaterial({
+            uniforms: {
+                uPrevState: { value: null },
+                uCurrState: { value: null },
+                uResolution: { value: new THREE.Vector2(simResolution, simResolution) },
+                uWaveSpeed: { value: waveSpeed },
+                uDamping: { value: damping },
+                uPointer: { value: new THREE.Vector3(0, 0, 0) },
+                uBrushSize: { value: brushSize },
+                uBrushSoftness: { value: brushSoftness },
+                uOscillator: { value: new THREE.Vector3(0.5, 0.5, 0) },
+                uSpeakerSize: { value: speakerSizeR },
+            },
+            vertexShader: simulationMaterial.vertexShader,
+            fragmentShader: simulationMaterial.fragmentShader
+        });
+
+        const displayMaterialR = new THREE.ShaderMaterial({
+            uniforms: {
+                uState: { value: null },
+                uResolution: { value: new THREE.Vector2(simResolution, simResolution) }
+            },
+            vertexShader: displayMaterial.vertexShader,
+            fragmentShader: displayMaterial.fragmentShader
+        });
+
+        // === Geometry (full-screen quad) ===
+        const geometry = new THREE.PlaneGeometry(2, 2);
+        const simulationMesh = new THREE.Mesh(geometry, simulationMaterial);
+        const displayMesh = new THREE.Mesh(geometry, displayMaterial);
+        const simulationMeshR = new THREE.Mesh(geometry, simulationMaterialR);
+        const displayMeshR = new THREE.Mesh(geometry, displayMaterialR);
+
+        // === Pointer State ===
+        const pointer = { x: 0, y: 0, active: false };
+        const pointerR = { x: 0, y: 0, active: false }; // Right channel pointer
+
+        function updatePointer(clientX, clientY) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const x = (clientX - rect.left) / rect.width;
+            const y = 1.0 - (clientY - rect.top) / rect.height;
+            pointer.x = x;
+            pointer.y = y;
+        }
+
+        function updatePointerR(clientX, clientY) {
+            const rect = rendererR.domElement.getBoundingClientRect();
+            const x = (clientX - rect.left) / rect.width;
+            const y = 1.0 - (clientY - rect.top) / rect.height;
+            pointerR.x = x;
+            pointerR.y = y;
+        }
+
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            pointer.active = true;
+            updatePointer(e.clientX, e.clientY);
+        });
+
+        renderer.domElement.addEventListener('mousemove', (e) => {
+            if (pointer.active) {
+                updatePointer(e.clientX, e.clientY);
+            }
+        });
+
+        renderer.domElement.addEventListener('mouseup', () => {
+            pointer.active = false;
+        });
+
+        renderer.domElement.addEventListener('mouseleave', () => {
+            pointer.active = false;
+        });
+
+        // Right canvas pointer events
+        rendererR.domElement.addEventListener('mousedown', (e) => {
+            pointerR.active = true;
+            updatePointerR(e.clientX, e.clientY);
+        });
+
+        rendererR.domElement.addEventListener('mousemove', (e) => {
+            if (pointerR.active) {
+                updatePointerR(e.clientX, e.clientY);
+            }
+        });
+
+        rendererR.domElement.addEventListener('mouseup', () => {
+            pointerR.active = false;
+        });
+
+        rendererR.domElement.addEventListener('mouseleave', () => {
+            pointerR.active = false;
+        });
+
+        // Touch support
+        renderer.domElement.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            pointer.active = true;
+            updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        renderer.domElement.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (pointer.active) {
+                updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: false });
+
+        renderer.domElement.addEventListener('touchend', () => {
+            pointer.active = false;
+        });
+
+        // Right canvas touch support
+        rendererR.domElement.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            pointerR.active = true;
+            updatePointerR(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        rendererR.domElement.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (pointerR.active) {
+                updatePointerR(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: false });
+
+        rendererR.domElement.addEventListener('touchend', () => {
+            pointerR.active = false;
+        });
+
+        // === Window Resize ===
+        window.addEventListener('resize', () => {
+            canvasSize = getCanvasSize();
+            renderer.setSize(canvasSize, canvasSize);
+            rendererR.setSize(canvasSize, canvasSize);
+        });
+
+        // === FPS Counter ===
+        let frameCount = 0;
+        let lastFpsUpdate = performance.now();
+        const fpsDisplay = document.getElementById('fps');
+
+        function updateFPS() {
+            frameCount++;
+            const now = performance.now();
+            if (now - lastFpsUpdate >= 1000) {
+                fpsDisplay.textContent = `FPS: ${frameCount}`;
+                frameCount = 0;
+                lastFpsUpdate = now;
+            }
+        }
+
+        // === Control Panel Wiring ===
+        const resolutionSelect = document.getElementById('resolution');
+        const waveSpeedSlider = document.getElementById('waveSpeed');
+        const dampingSlider = document.getElementById('damping');
+        const forceStrengthSlider = document.getElementById('forceStrength');
+        const brushSizeSlider = document.getElementById('brushSize');
+        const brushSoftnessSlider = document.getElementById('brushSoftness');
+        const resetBtn = document.getElementById('resetBtn');
+
+        const resValue = document.getElementById('resValue');
+        const speedValue = document.getElementById('speedValue');
+        const dampValue = document.getElementById('dampValue');
+        const forceValue = document.getElementById('forceValue');
+        const brushValue = document.getElementById('brushValue');
+        const softnessValue = document.getElementById('softnessValue');
+
+        resolutionSelect.addEventListener('change', (e) => {
+            simResolution = parseInt(e.target.value);
+            resValue.textContent = `${simResolution}×${simResolution}`;
+            createRenderTargets(simResolution);
+        });
+
+        waveSpeedSlider.addEventListener('input', (e) => {
+            waveSpeed = parseFloat(e.target.value);
+            speedValue.textContent = waveSpeed.toFixed(2);
+            simulationMaterial.uniforms.uWaveSpeed.value = waveSpeed;
+            simulationMaterialR.uniforms.uWaveSpeed.value = waveSpeed;
+        });
+
+        dampingSlider.addEventListener('input', (e) => {
+            damping = parseFloat(e.target.value);
+            dampValue.textContent = damping.toFixed(4);
+            simulationMaterial.uniforms.uDamping.value = damping;
+            simulationMaterialR.uniforms.uDamping.value = damping;
+        });
+
+        forceStrengthSlider.addEventListener('input', (e) => {
+            forceStrength = parseFloat(e.target.value);
+            forceValue.textContent = forceStrength.toFixed(2);
+        });
+
+        brushSizeSlider.addEventListener('input', (e) => {
+            brushSize = parseFloat(e.target.value);
+            brushValue.textContent = brushSize.toFixed(3);
+            simulationMaterial.uniforms.uBrushSize.value = brushSize;
+            simulationMaterialR.uniforms.uBrushSize.value = brushSize;
+        });
+
+        brushSoftnessSlider.addEventListener('input', (e) => {
+            brushSoftness = parseFloat(e.target.value) / 100; // Convert 0-100 to 0-1
+            softnessValue.textContent = `${Math.round(brushSoftness * 100)}%`;
+            simulationMaterial.uniforms.uBrushSoftness.value = brushSoftness;
+            simulationMaterialR.uniforms.uBrushSoftness.value = brushSoftness;
+        });
+
+        resetBtn.addEventListener('click', () => {
+            createRenderTargets(simResolution);
+        });
+
+        // === Oscillator Controls ===
+        const oscFrequencySlider = document.getElementById('oscFrequency');
+        const oscStrengthSlider = document.getElementById('oscStrength');
+        const speakerSizeSlider = document.getElementById('speakerSize');
+        const simStepsSlider = document.getElementById('simSteps');
+        const oscToggleBtn = document.getElementById('oscToggle');
+
+        const freqValue = document.getElementById('freqValue');
+        const oscStrengthValue = document.getElementById('oscStrengthValue');
+        const speakerSizeValue = document.getElementById('speakerSizeValue');
+        const stepsValue = document.getElementById('stepsValue');
+
+        oscFrequencySlider.addEventListener('input', (e) => {
+            oscFrequency = parseFloat(e.target.value);
+            freqValue.textContent = `${Math.round(oscFrequency)} Hz`;
+            if (oscillator) {
+                oscillator.frequency.value = oscFrequency;
+            }
+        });
+
+        oscStrengthSlider.addEventListener('input', (e) => {
+            oscStrength = parseFloat(e.target.value);
+            oscStrengthValue.textContent = oscStrength.toFixed(2);
+        });
+
+        speakerSizeSlider.addEventListener('input', (e) => {
+            speakerSize = parseFloat(e.target.value);
+            speakerSizeValue.textContent = speakerSize.toFixed(2);
+            simulationMaterial.uniforms.uSpeakerSize.value = speakerSize;
+        });
+
+        simStepsSlider.addEventListener('input', (e) => {
+            simSteps = parseInt(e.target.value);
+            stepsValue.textContent = simSteps;
+        });
+
+        function startOscillator() {
+            if (oscRunning) return;
+
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            oscillator = audioContext.createOscillator();
+            analyser = audioContext.createAnalyser();
+
+            oscillator.type = 'sine';
+            oscillator.frequency.value = oscFrequency;
+
+            // Connect oscillator -> analyser -> destination (speakers)
+            oscillator.connect(analyser);
+            analyser.connect(audioContext.destination);
+
+            analyser.fftSize = 256;
+            dataArray = new Float32Array(analyser.fftSize);
+
+            oscillator.start();
+            oscRunning = true;
+            oscToggleBtn.textContent = 'Stop Oscillator';
+        }
+
+        function stopOscillator() {
+            if (!oscRunning) return;
+
+            oscillator.stop();
+            oscillator.disconnect();
+            audioContext.close();
+
+            oscillator = null;
+            analyser = null;
+            audioContext = null;
+            dataArray = null;
+
+            oscRunning = false;
+            oscToggleBtn.textContent = 'Start Oscillator';
+
+            // Reset oscillator amplitude
+            simulationMaterial.uniforms.uOscillator.value.z = 0;
+        }
+
+        oscToggleBtn.addEventListener('click', () => {
+            if (oscRunning) {
+                stopOscillator();
+            } else {
+                startOscillator();
+            }
+        });
+
+        // === Stereo Controls ===
+        const displayModeSelect = document.getElementById('displayMode');
+        const stereoControlsDiv = document.getElementById('stereoControls');
+        const monoOscControls = document.querySelector('#oscToggle').parentElement.querySelectorAll('.control-group');
+
+        // Left channel controls
+        const oscFrequencyLSlider = document.getElementById('oscFrequencyL');
+        const oscStrengthLSlider = document.getElementById('oscStrengthL');
+        const speakerSizeLSlider = document.getElementById('speakerSizeL');
+        const freqValueL = document.getElementById('freqValueL');
+        const oscStrengthValueL = document.getElementById('oscStrengthValueL');
+        const speakerSizeValueL = document.getElementById('speakerSizeValueL');
+
+        // Right channel controls
+        const oscFrequencyRSlider = document.getElementById('oscFrequencyR');
+        const oscStrengthRSlider = document.getElementById('oscStrengthR');
+        const speakerSizeRSlider = document.getElementById('speakerSizeR');
+        const freqValueR = document.getElementById('freqValueR');
+        const oscStrengthValueR = document.getElementById('oscStrengthValueR');
+        const speakerSizeValueR = document.getElementById('speakerSizeValueR');
+
+        const stereoOscToggleBtn = document.getElementById('stereoOscToggle');
+
+        oscFrequencyLSlider.addEventListener('input', (e) => {
+            oscFrequencyL = parseFloat(e.target.value);
+            freqValueL.textContent = `${Math.round(oscFrequencyL)} Hz`;
+            if (oscillatorL) oscillatorL.frequency.value = oscFrequencyL;
+        });
+
+        oscStrengthLSlider.addEventListener('input', (e) => {
+            oscStrengthL = parseFloat(e.target.value);
+            oscStrengthValueL.textContent = oscStrengthL.toFixed(2);
+        });
+
+        speakerSizeLSlider.addEventListener('input', (e) => {
+            speakerSizeL = parseFloat(e.target.value);
+            speakerSizeValueL.textContent = speakerSizeL.toFixed(2);
+            simulationMaterial.uniforms.uSpeakerSize.value = speakerSizeL;
+        });
+
+        oscFrequencyRSlider.addEventListener('input', (e) => {
+            oscFrequencyR = parseFloat(e.target.value);
+            freqValueR.textContent = `${Math.round(oscFrequencyR)} Hz`;
+            if (oscillatorR) oscillatorR.frequency.value = oscFrequencyR;
+        });
+
+        oscStrengthRSlider.addEventListener('input', (e) => {
+            oscStrengthR = parseFloat(e.target.value);
+            oscStrengthValueR.textContent = oscStrengthR.toFixed(2);
+        });
+
+        speakerSizeRSlider.addEventListener('input', (e) => {
+            speakerSizeR = parseFloat(e.target.value);
+            speakerSizeValueR.textContent = speakerSizeR.toFixed(2);
+            simulationMaterialR.uniforms.uSpeakerSize.value = speakerSizeR;
+        });
+
+        function startStereoOscillators() {
+            if (stereoOscRunning) return;
+
+            stereoAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+            // Left oscillator - panned left
+            oscillatorL = stereoAudioContext.createOscillator();
+            analyserL = stereoAudioContext.createAnalyser();
+            const pannerL = stereoAudioContext.createStereoPanner();
+            pannerL.pan.value = -1;
+
+            oscillatorL.type = 'sine';
+            oscillatorL.frequency.value = oscFrequencyL;
+            oscillatorL.connect(analyserL);
+            analyserL.connect(pannerL);
+            pannerL.connect(stereoAudioContext.destination);
+
+            analyserL.fftSize = 256;
+            dataArrayL = new Float32Array(analyserL.fftSize);
+
+            // Right oscillator - panned right
+            oscillatorR = stereoAudioContext.createOscillator();
+            analyserR = stereoAudioContext.createAnalyser();
+            const pannerR = stereoAudioContext.createStereoPanner();
+            pannerR.pan.value = 1;
+
+            oscillatorR.type = 'sine';
+            oscillatorR.frequency.value = oscFrequencyR;
+            oscillatorR.connect(analyserR);
+            analyserR.connect(pannerR);
+            pannerR.connect(stereoAudioContext.destination);
+
+            analyserR.fftSize = 256;
+            dataArrayR = new Float32Array(analyserR.fftSize);
+
+            oscillatorL.start();
+            oscillatorR.start();
+            stereoOscRunning = true;
+            stereoOscToggleBtn.textContent = 'Stop Stereo Oscillators';
+        }
+
+        function stopStereoOscillators() {
+            if (!stereoOscRunning) return;
+
+            oscillatorL.stop();
+            oscillatorL.disconnect();
+            oscillatorR.stop();
+            oscillatorR.disconnect();
+            stereoAudioContext.close();
+
+            oscillatorL = null;
+            oscillatorR = null;
+            analyserL = null;
+            analyserR = null;
+            stereoAudioContext = null;
+            dataArrayL = null;
+            dataArrayR = null;
+
+            stereoOscRunning = false;
+            stereoOscToggleBtn.textContent = 'Start Stereo Oscillators';
+
+            simulationMaterial.uniforms.uOscillator.value.z = 0;
+            simulationMaterialR.uniforms.uOscillator.value.z = 0;
+        }
+
+        stereoOscToggleBtn.addEventListener('click', () => {
+            if (stereoOscRunning) {
+                stopStereoOscillators();
+            } else {
+                startStereoOscillators();
+            }
+        });
+
+        // Stereo size slider
+        const stereoSizeControl = document.getElementById('stereo-size-control');
+        const stereoSizeSlider = document.getElementById('stereoSize');
+        const stereoSizeValueEl = document.getElementById('stereoSizeValue');
+
+        stereoSizeSlider.addEventListener('input', (e) => {
+            stereoSizeScale = parseFloat(e.target.value) / 100;
+            stereoSizeValueEl.textContent = `${e.target.value}%`;
+            canvasSize = getCanvasSize();
+            renderer.setSize(canvasSize, canvasSize);
+            rendererR.setSize(canvasSize, canvasSize);
+        });
+
+        // Stereo spread slider (offset left canvas left, right canvas right)
+        const stereoSpreadControl = document.getElementById('stereo-spread-control');
+        const stereoSpreadSlider = document.getElementById('stereoSpread');
+        const stereoSpreadValueEl = document.getElementById('stereoSpreadValue');
+        let stereoSpread = 0;
+
+        stereoSpreadSlider.addEventListener('input', (e) => {
+            stereoSpread = parseInt(e.target.value);
+            stereoSpreadValueEl.textContent = `${stereoSpread}px`;
+            // Negative spread = closer (negative margins = overlap), Positive spread = apart (positive margins = gap)
+            renderer.domElement.style.marginRight = `${stereoSpread}px`;
+            rendererR.domElement.style.marginLeft = `${stereoSpread}px`;
+        });
+
+        // Stereo click offset slider (offset where click registers on each canvas)
+        const stereoClickOffsetControl = document.getElementById('stereo-clickoffset-control');
+        const stereoClickOffsetSlider = document.getElementById('stereoClickOffset');
+        const stereoClickOffsetValueEl = document.getElementById('stereoClickOffsetValue');
+        let stereoClickOffset = 0; // In pixels
+
+        stereoClickOffsetSlider.addEventListener('input', (e) => {
+            stereoClickOffset = parseInt(e.target.value);
+            stereoClickOffsetValueEl.textContent = `${stereoClickOffset}px`;
+        });
+
+        // Display mode switching
+        displayModeSelect.addEventListener('change', (e) => {
+            displayMode = e.target.value;
+
+            if (displayMode === 'stereo') {
+                // Show stereo controls, hide mono oscillator controls
+                stereoControlsDiv.style.display = 'block';
+                document.getElementById('oscToggle').style.display = 'none';
+                document.getElementById('oscFrequency').parentElement.style.display = 'none';
+                document.getElementById('oscStrength').parentElement.style.display = 'none';
+                document.getElementById('speakerSize').parentElement.style.display = 'none';
+
+                // Show right canvas
+                rendererR.domElement.style.display = 'block';
+                canvasContainer.classList.add('stereo');
+
+                // Show size, spread, and click offset controls
+                stereoSizeControl.style.display = 'flex';
+                stereoSpreadControl.style.display = 'flex';
+                stereoClickOffsetControl.style.display = 'flex';
+
+                // Stop mono oscillator if running
+                if (oscRunning) stopOscillator();
+            } else {
+                // Show mono controls, hide stereo controls
+                stereoControlsDiv.style.display = 'none';
+                document.getElementById('oscToggle').style.display = 'block';
+                document.getElementById('oscFrequency').parentElement.style.display = 'block';
+                document.getElementById('oscStrength').parentElement.style.display = 'block';
+                document.getElementById('speakerSize').parentElement.style.display = 'block';
+
+                // Hide right canvas
+                rendererR.domElement.style.display = 'none';
+                canvasContainer.classList.remove('stereo');
+
+                // Hide size, spread, and click offset controls
+                stereoSizeControl.style.display = 'none';
+                stereoSpreadControl.style.display = 'none';
+                stereoClickOffsetControl.style.display = 'none';
+
+                // Reset spread margins when leaving stereo mode
+                renderer.domElement.style.marginRight = '0px';
+                rendererR.domElement.style.marginLeft = '0px';
+
+                // Stop stereo oscillators if running
+                if (stereoOscRunning) stopStereoOscillators();
+            }
+
+            // Resize canvases
+            canvasSize = getCanvasSize();
+            renderer.setSize(canvasSize, canvasSize);
+            rendererR.setSize(canvasSize, canvasSize);
+        });
+
+        // === Animation Loop ===
+        function animate() {
+            requestAnimationFrame(animate);
+            updateFPS();
+
+            // Unified pointer: if either canvas is active, affect both simulations
+            const pointerActive = pointer.active || pointerR.active;
+            const pointerX = pointer.active ? pointer.x : pointerR.x;
+            const pointerY = pointer.active ? pointer.y : pointerR.y;
+
+            // Calculate click offset in normalized coordinates (pixels / canvas size)
+            const clickOffsetNorm = canvasSize > 0 ? stereoClickOffset / canvasSize : 0;
+
+            // Set pointer uniform for left/mono simulation
+            // In stereo mode, left canvas click is offset LEFT (subtract from X)
+            const leftPointerX = displayMode === 'stereo' ? pointerX - clickOffsetNorm : pointerX;
+            simulationMaterial.uniforms.uPointer.value.set(
+                leftPointerX,
+                pointerY,
+                pointerActive ? forceStrength : 0
+            );
+
+            // Set pointer uniform for right simulation
+            // In stereo mode, right canvas click is offset RIGHT (add to X)
+            const rightPointerX = pointerX + clickOffsetNorm;
+            simulationMaterialR.uniforms.uPointer.value.set(
+                rightPointerX,
+                pointerY,
+                pointerActive ? forceStrength : 0
+            );
+
+            if (displayMode === 'mono') {
+                // === MONO MODE ===
+                let audioSamples = null;
+                if (oscRunning && analyser && dataArray) {
+                    analyser.getFloatTimeDomainData(dataArray);
+                    audioSamples = dataArray;
+                }
+
+                scene.add(simulationMesh);
+                scene.remove(displayMesh);
+
+                for (let step = 0; step < simSteps; step++) {
+                    if (audioSamples) {
+                        const sampleIndex = Math.floor((step / simSteps) * audioSamples.length);
+                        const amplitude = audioSamples[sampleIndex] * oscStrength;
+                        simulationMaterial.uniforms.uOscillator.value.set(0.5, 0.5, amplitude);
+                    }
+
+                    simulationMaterial.uniforms.uCurrState.value = readTarget.texture;
+                    simulationMaterial.uniforms.uPrevState.value = readTarget.texture;
+
+                    renderer.setRenderTarget(writeTarget);
+                    renderer.render(scene, camera);
+
+                    [readTarget, writeTarget] = [writeTarget, readTarget];
+                }
+
+                displayMaterial.uniforms.uState.value = readTarget.texture;
+                scene.remove(simulationMesh);
+                scene.add(displayMesh);
+                renderer.setRenderTarget(null);
+                renderer.render(scene, camera);
+
+            } else {
+                // === STEREO MODE ===
+                let audioSamplesL = null, audioSamplesR = null;
+                if (stereoOscRunning && analyserL && dataArrayL) {
+                    analyserL.getFloatTimeDomainData(dataArrayL);
+                    audioSamplesL = dataArrayL;
+                }
+                if (stereoOscRunning && analyserR && dataArrayR) {
+                    analyserR.getFloatTimeDomainData(dataArrayR);
+                    audioSamplesR = dataArrayR;
+                }
+
+                // Left channel simulation
+                scene.add(simulationMesh);
+                scene.remove(displayMesh);
+
+                for (let step = 0; step < simSteps; step++) {
+                    if (audioSamplesL) {
+                        const sampleIndex = Math.floor((step / simSteps) * audioSamplesL.length);
+                        const amplitude = audioSamplesL[sampleIndex] * oscStrengthL;
+                        simulationMaterial.uniforms.uOscillator.value.set(0.5, 0.5, amplitude);
+                    }
+
+                    simulationMaterial.uniforms.uCurrState.value = readTarget.texture;
+                    simulationMaterial.uniforms.uPrevState.value = readTarget.texture;
+
+                    renderer.setRenderTarget(writeTarget);
+                    renderer.render(scene, camera);
+
+                    [readTarget, writeTarget] = [writeTarget, readTarget];
+                }
+
+                displayMaterial.uniforms.uState.value = readTarget.texture;
+                scene.remove(simulationMesh);
+                scene.add(displayMesh);
+                renderer.setRenderTarget(null);
+                renderer.render(scene, camera);
+
+                // Right channel simulation
+                sceneR.add(simulationMeshR);
+                sceneR.remove(displayMeshR);
+
+                for (let step = 0; step < simSteps; step++) {
+                    if (audioSamplesR) {
+                        const sampleIndex = Math.floor((step / simSteps) * audioSamplesR.length);
+                        const amplitude = audioSamplesR[sampleIndex] * oscStrengthR;
+                        simulationMaterialR.uniforms.uOscillator.value.set(0.5, 0.5, amplitude);
+                    }
+
+                    simulationMaterialR.uniforms.uCurrState.value = readTargetR.texture;
+                    simulationMaterialR.uniforms.uPrevState.value = readTargetR.texture;
+
+                    rendererR.setRenderTarget(writeTargetR);
+                    rendererR.render(sceneR, camera);
+
+                    [readTargetR, writeTargetR] = [writeTargetR, readTargetR];
+                }
+
+                displayMaterialR.uniforms.uState.value = readTargetR.texture;
+                sceneR.remove(simulationMeshR);
+                sceneR.add(displayMeshR);
+                rendererR.setRenderTarget(null);
+                rendererR.render(sceneR, camera);
+            }
+        }
+
+        animate();
+    </script>
+</body>
+</html>
